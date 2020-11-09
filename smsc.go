@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -47,16 +48,16 @@ func NewSmsc() Smsc {
 	return Smsc{sessions}
 }
 
-func (smsc *Smsc) Start(wg sync.WaitGroup) {
+func (smsc *Smsc) Start(port int, wg sync.WaitGroup) {
 	defer wg.Done()
 
-	ln, err := net.Listen("tcp", ":2775")
+	ln, err := net.Listen("tcp", fmt.Sprint(":", port))
 	if err != nil {
 		log.Panic(err)
 	}
 	defer ln.Close()
 
-	log.Println("SMSC simulator listening on port 2775")
+	log.Println("SMSC simulator listening on port", port)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -120,7 +121,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				log.Printf("bind request from system_id[%s]\n", systemId)
 
 				respCmdId := 2147483648 + cmdId // hack to calc resp cmd id
-				respBytes = stringBodyPduBytes(respCmdId, STS_OK, seqNum, "smscsim")
+				respBytes = pduWithStringBodyBytes(respCmdId, STS_OK, seqNum, "smscsim")
 			}
 		case UNBIND: // unbind request
 			{
@@ -142,7 +143,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				}
 				log.Printf("submit_sm from system_id[%s]\n", systemId)
 				msgId := rand.Int()
-				respBytes = stringBodyPduBytes(SUBMIT_SM_RESP, STS_OK, seqNum, strconv.Itoa(msgId))
+				respBytes = pduWithStringBodyBytes(SUBMIT_SM_RESP, STS_OK, seqNum, strconv.Itoa(msgId))
 			}
 		case DELIVER_SM_RESP: // deliver_sm_resp
 			{
@@ -191,7 +192,7 @@ func pduHeaderBytes(cmdId, cmdSts, seqNum uint32) []byte {
 	return buf
 }
 
-func stringBodyPduBytes(cmdId, cmdSts, seqNum uint32, body string) []byte {
+func pduWithStringBodyBytes(cmdId, cmdSts, seqNum uint32, body string) []byte {
 	cmdLen := 16 + len(body) + 1 // 16 for header + body length with null terminator
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint32(buf[0:], uint32(cmdLen))
