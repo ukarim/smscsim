@@ -10,22 +10,32 @@ import (
 var wg sync.WaitGroup
 
 func main() {
-	smscPort := 2775
-	smscPortStr := os.Getenv("SMSC_PORT")
-	if smscPortStr != "" {
-		p, err := strconv.Atoi(smscPortStr)
-		if err != nil || p < 1 {
-			log.Fatalf("invalid SMSC_PORT [%s]", smscPortStr)
-		} else {
-			smscPort = p
-		}
-	}
+	smscPort := getPort("SMSC_PORT", 2775)
+	webPort := getPort("WEB_PORT", 12775)
 
-	wg.Add(1)
+	wg.Add(2)
 
 	// start smpp server
 	smsc := NewSmsc()
 	go smsc.Start(smscPort, wg)
 
+	// start web server
+	webServer := NewWebServer(smsc)
+	go webServer.Start(webPort, wg)
+
 	wg.Wait()
+}
+
+func getPort(envVar string, defVal int) int {
+	port := defVal
+	portStr := os.Getenv(envVar)
+	if portStr != "" {
+		p, err := strconv.Atoi(portStr)
+		if err != nil || p < 1 {
+			log.Fatalf("invalid port %s [%s]", envVar, portStr)
+		} else {
+			port = p
+		}
+	}
+	return port
 }

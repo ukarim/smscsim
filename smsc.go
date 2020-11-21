@@ -37,12 +37,19 @@ const (
 )
 
 const (
-	TAG_RECEIPTED_MSG_ID = 0x001E
+	TLV_RECEIPTED_MSG_ID = 0x001E
+	TLV_MESSAGE_STATE    = 0x0427
 )
 
 type Session struct {
 	SystemId string
 	Conn     net.Conn
+}
+
+type Tlv struct {
+	Tag   int
+	Len   int
+	Value []byte
 }
 
 type Smsc struct {
@@ -75,12 +82,35 @@ func (smsc *Smsc) Start(port int, wg sync.WaitGroup) {
 }
 
 func (smsc *Smsc) BoundSystemIds() []string {
-	systemIds := make([]string, len(smsc.Sessions))
-	for id, sess := range smsc.Sessions {
-		systemId := sess.SystemId + "-" + strconv.Itoa(id)
+	var systemIds []string
+	for _, sess := range smsc.Sessions {
+		systemId := sess.SystemId
 		systemIds = append(systemIds, systemId)
 	}
 	return systemIds
+}
+
+func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) {
+	sent := false
+	for _, sess := range smsc.Sessions {
+		if systemId == sess.SystemId {
+			// TODO implement UDH for large messages
+			shortMsg := truncateString(message, 70) // just truncate to 70 symbols
+			var tlvs []Tlv
+			moMessage := deliverSmPDU(sender, recipient, shortMsg, rand.Int(), tlvs)
+			conn := sess.Conn
+			if _, err := conn.Write(moMessage); err != nil {
+				log.Printf("Cannot send MO message to systemId: [%s] due to [%v]", systemId, err)
+			} else {
+				sent = true
+			}
+		}
+	}
+	if sent {
+		log.Printf("MO message successfully sent to systemId: [%s]. sender: [%s], recipient: [%s]", systemId, sender, recipient)
+	} else {
+		log.Printf("Cannot send MO message to systemId: [%s]. No bound session found", systemId)
+	}
 }
 
 // how to convert ints to and from bytes https://golang.org/pkg/encoding/binary/
@@ -127,18 +157,18 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				log.Printf("bind request from system_id[%s]\n", systemId)
 
 				respCmdId := 2147483648 + cmdId // hack to calc resp cmd id
-				respBytes = pduWithStringBodyBytes(respCmdId, STS_OK, seqNum, "smscsim")
+				respBytes = stringBodyPDU(respCmdId, STS_OK, seqNum, "smscsim")
 			}
 		case UNBIND: // unbind request
 			{
 				log.Printf("unbind request from system_id[%s]\n", systemId)
-				respBytes = pduHeaderBytes(UNBIND_RESP, STS_OK, seqNum)
+				respBytes = headerPDU(UNBIND_RESP, STS_OK, seqNum)
 				stopLoop = true
 			}
 		case ENQUIRE_LINK: // enquire_link
 			{
 				log.Printf("enquire_link from system_id[%s]\n", systemId)
-				respBytes = pduHeaderBytes(ENQUIRE_LINK_RESP, STS_OK, seqNum)
+				respBytes = headerPDU(ENQUIRE_LINK_RESP, STS_OK, seqNum)
 			}
 		case SUBMIT_SM: // submit_sm
 			{
@@ -154,7 +184,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 				srvTypeEndIdx := bytes.Index(pduBody, nullTerm)
 				if srvTypeEndIdx == -1 {
-					respBytes = pduHeaderBytes(GENERIC_NACK, STS_INVALID_CMD, seqNum)
+					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
 				}
 				idxCounter = idxCounter + srvTypeEndIdx
@@ -162,7 +192,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 				srcAddrEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
 				if srcAddrEndIdx == -1 {
-					respBytes = pduHeaderBytes(GENERIC_NACK, STS_INVALID_CMD, seqNum)
+					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
 				}
 				idxCounter = idxCounter + srcAddrEndIdx
@@ -170,7 +200,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 				destAddrEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
 				if destAddrEndIdx == -1 {
-					respBytes = pduHeaderBytes(GENERIC_NACK, STS_INVALID_CMD, seqNum)
+					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
 				}
 				idxCounter = idxCounter + destAddrEndIdx
@@ -178,7 +208,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 				schedEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
 				if schedEndIdx == -1 {
-					respBytes = pduHeaderBytes(GENERIC_NACK, STS_INVALID_CMD, seqNum)
+					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
 				}
 				idxCounter = idxCounter + schedEndIdx
@@ -186,7 +216,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 				validityEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
 				if validityEndIdx == -1 {
-					respBytes = pduHeaderBytes(GENERIC_NACK, STS_INVALID_CMD, seqNum)
+					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
 				}
 				idxCounter = idxCounter + validityEndIdx
@@ -194,13 +224,13 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 				// prepare submit_sm_resp
 				msgId := strconv.Itoa(rand.Int())
-				respBytes = pduWithStringBodyBytes(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
+				respBytes = stringBodyPDU(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
 
 				if registeredDlr != 0 {
 					go func() {
 						time.Sleep(2000 * time.Millisecond)
 						now := time.Now()
-						dlr := pduDeliveryReceipt(msgId, now, now)
+						dlr := deliveryReceiptPDU(msgId, now, now)
 						if _, err := conn.Write(dlr); err != nil {
 							log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
 							return
@@ -232,7 +262,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				}
 				log.Printf("unsupported pdu cmd_id(%d) from %s", cmdId, systemId)
 				// generic nack packet with status "Invalid Command ID"
-				respBytes = pduHeaderBytes(GENERIC_NACK, STS_INVALID_CMD, seqNum)
+				respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 			}
 		}
 
@@ -247,7 +277,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 	}
 }
 
-func pduHeaderBytes(cmdId, cmdSts, seqNum uint32) []byte {
+func headerPDU(cmdId, cmdSts, seqNum uint32) []byte {
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint32(buf[0:], 16)
 	binary.BigEndian.PutUint32(buf[4:], cmdId)
@@ -256,7 +286,7 @@ func pduHeaderBytes(cmdId, cmdSts, seqNum uint32) []byte {
 	return buf
 }
 
-func pduWithStringBodyBytes(cmdId, cmdSts, seqNum uint32, body string) []byte {
+func stringBodyPDU(cmdId, cmdSts, seqNum uint32, body string) []byte {
 	cmdLen := 16 + len(body) + 1 // 16 for header + body length with null terminator
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint32(buf[0:], uint32(cmdLen))
@@ -270,49 +300,96 @@ func pduWithStringBodyBytes(cmdId, cmdSts, seqNum uint32, body string) []byte {
 
 const DELIVERY_RECEIPT_FORMAT = "id:%s sub:001 dlvrd:001 submit date:%s done date:%s stat:DELIVRD err:000 Text:..."
 
-func pduDeliveryReceipt(msgId string, submitDate, doneDate time.Time) []byte {
+func deliveryReceiptPDU(msgId string, submitDate, doneDate time.Time) []byte {
 	sbtDateFrmt := submitDate.Format("0601021504")
 	doneDateFrmt := doneDate.Format("0601021504")
 	deliveryReceipt := fmt.Sprintf(DELIVERY_RECEIPT_FORMAT, msgId, sbtDateFrmt, doneDateFrmt)
+	var tlvs []Tlv
 
+	// receipted_msg_id TLV
+	var rcptMsgIdBuf bytes.Buffer
+	rcptMsgIdBuf.WriteString(msgId)
+	rcptMsgIdBuf.WriteByte(0) // null terminator
+	receiptMsgId := Tlv{TLV_RECEIPTED_MSG_ID, rcptMsgIdBuf.Len(), rcptMsgIdBuf.Bytes()}
+	tlvs = append(tlvs, receiptMsgId)
+
+	// message_state TLV
+	msgStateTlv := Tlv{TLV_MESSAGE_STATE, 1, []byte{2}} // 2 - delivered
+	tlvs = append(tlvs, msgStateTlv)
+
+	return deliverSmPDU("", "", deliveryReceipt, rand.Int(), tlvs)
+}
+
+func deliverSmPDU(sender, recipient, shortMessage string, seqNum int, tlvs []Tlv) []byte {
 	// header without cmd_len
 	header := make([]byte, 12)
 	binary.BigEndian.PutUint32(header[0:], uint32(DELIVER_SM))
 	binary.BigEndian.PutUint32(header[4:], uint32(0))
-	binary.BigEndian.PutUint32(header[8:], uint32(rand.Int())) // rand seq num
+	binary.BigEndian.PutUint32(header[8:], uint32(seqNum)) // rand seq num
 
 	// pdu body buffer
 	var buf bytes.Buffer
 	buf.Write(header)
 
-	// pdu fields from service_type to sm_default_msg_id
-	// just fill with zeros
-	for i := 16; i < 32; i++ {
+	buf.WriteString("smscsim")
+	buf.WriteByte(0) // null term
+
+	buf.WriteByte(0) // src ton
+	buf.WriteByte(0) // src npi
+	if sender == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteString(sender)
 		buf.WriteByte(0)
 	}
 
-	buf.WriteByte(byte(len(deliveryReceipt))) // sm_len
-	buf.WriteString(deliveryReceipt)          // short_message
+	buf.WriteByte(0) // dest ton
+	buf.WriteByte(0) // dest npi
+	if recipient == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteString(recipient)
+		buf.WriteByte(0)
+	}
 
-	// smsc msgid tag
-	msgIdLen := len(msgId)
-	tlvMsgId := make([]byte, 4) // initial cap
-	binary.BigEndian.PutUint16(tlvMsgId[0:], TAG_RECEIPTED_MSG_ID)
-	binary.BigEndian.PutUint16(tlvMsgId[2:], uint16(msgIdLen+1)) // +1 for null terminator
-	tlvMsgId = append(tlvMsgId, msgId...)
-	tlvMsgId = append(tlvMsgId, 0)
+	buf.WriteByte(0) // esm class
+	buf.WriteByte(0) // protocol id
+	buf.WriteByte(0) // priority flag
+	buf.WriteByte(0) // sched delivery time
+	buf.WriteByte(0) // validity period
+	buf.WriteByte(0) // registered delivery
+	buf.WriteByte(0) // replace if present
+	buf.WriteByte(0) // data coding
+	buf.WriteByte(0) // def msg id
 
-	// append tlv to pdu body
-	buf.Write(tlvMsgId)
+	smLen := len(shortMessage)
+	buf.WriteByte(byte(smLen))
+	buf.WriteString(shortMessage)
+
+	for _, t := range tlvs {
+		tlvBytes := make([]byte, 4)
+		binary.BigEndian.PutUint16(tlvBytes[0:], uint16(t.Tag))
+		binary.BigEndian.PutUint16(tlvBytes[2:], uint16(t.Len))
+		buf.Write(tlvBytes)
+		buf.Write(t.Value)
+	}
 
 	// calc cmd lenth and append to the begining
 	cmdLen := buf.Len() + 4 // +4 for cmdLen field itself
 	cmdLenBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(cmdLenBytes[0:], uint32(cmdLen))
 
-	var dlrPdu bytes.Buffer
-	dlrPdu.Write(cmdLenBytes)
-	dlrPdu.Write(buf.Bytes())
+	var deliverSm bytes.Buffer
+	deliverSm.Write(cmdLenBytes)
+	deliverSm.Write(buf.Bytes())
 
-	return dlrPdu.Bytes()
+	return deliverSm.Bytes()
+}
+
+func truncateString(input string, maxLen int) string {
+	result := input
+	if len(input) > maxLen {
+		result = input[0:maxLen]
+	}
+	return result
 }
