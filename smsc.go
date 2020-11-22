@@ -90,26 +90,29 @@ func (smsc *Smsc) BoundSystemIds() []string {
 	return systemIds
 }
 
-func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) {
-	sent := false
+func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) error {
+	var conn net.Conn
 	for _, sess := range smsc.Sessions {
 		if systemId == sess.SystemId {
-			// TODO implement UDH for large messages
-			shortMsg := truncateString(message, 70) // just truncate to 70 symbols
-			var tlvs []Tlv
-			moMessage := deliverSmPDU(sender, recipient, shortMsg, rand.Int(), tlvs)
-			conn := sess.Conn
-			if _, err := conn.Write(moMessage); err != nil {
-				log.Printf("Cannot send MO message to systemId: [%s] due to [%v]", systemId, err)
-			} else {
-				sent = true
-			}
+			conn = sess.Conn
 		}
 	}
-	if sent {
-		log.Printf("MO message successfully sent to systemId: [%s]. sender: [%s], recipient: [%s]", systemId, sender, recipient)
-	} else {
+
+	if conn == nil {
 		log.Printf("Cannot send MO message to systemId: [%s]. No bound session found", systemId)
+		return fmt.Errorf("No session found for systemId: [%s]", systemId)
+	}
+
+	// TODO implement UDH for large messages
+	shortMsg := truncateString(message, 70) // just truncate to 70 symbols
+	var tlvs []Tlv
+	moMessage := deliverSmPDU(sender, recipient, shortMsg, rand.Int(), tlvs)
+	if _, err := conn.Write(moMessage); err != nil {
+		log.Printf("Cannot send MO message to systemId: [%s]. Network error [%v]", systemId, err)
+		return fmt.Errorf("Cannot send MO message. Network error")
+	} else {
+		log.Printf("MO message to systemId: [%s] was successfully sent. Sender: [%s], recipient: [%s]", systemId, sender, recipient)
+		return nil
 	}
 }
 

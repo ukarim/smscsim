@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"sync"
 	"text/template"
 )
@@ -65,12 +66,21 @@ const WEB_PAGE_TPL = `
     textarea {
       resize: vertical;
     }
+    select {
+      min-width: 200px;
+    }
     input[type="submit"] {
       font-weight: bold;
       font-size: 16px;
       color: #fff;
       text-transform: uppercase;
       background: #3585f7;
+    }
+    #message {
+      color: #009688;
+    }
+    #error {
+      color: #f44336;
     }
   </style>
 </head>
@@ -95,12 +105,18 @@ const WEB_PAGE_TPL = `
     </select>
   </p>
   <p>
-    <label for="message">Short message</label>
-    <textarea id="message" name="message" maxlength="70" placeholder="Short message..."></textarea>
+    <label for="short_message">Short message</label>
+    <textarea id="short_message" name="message" maxlength="70" placeholder="Short message..."></textarea>
   </p>
   <p>
     <input type="submit" value="Submit">
   </p>
+  {{ if .Message }}
+  <p id="message">{{ .Message }}</p>
+  {{ end }}
+  {{ if .ErrorMessage }}
+  <p id="error">{{ .ErrorMessage }}</p>
+  {{ end }}
 </form>
 </div>
 </body>
@@ -112,7 +128,9 @@ type WebServer struct {
 }
 
 type TplVars struct {
-	SystemIds []string
+	SystemIds    []string
+	Message      string
+	ErrorMessage string
 }
 
 func NewWebServer(smsc Smsc) WebServer {
@@ -135,6 +153,7 @@ func webHandler(smsc *Smsc) func(http.ResponseWriter, *http.Request) {
 		if r.Method == "POST" {
 			if err := r.ParseForm(); err != nil {
 				log.Printf("Cannot parse POST params due [%v]", err)
+				fmt.Fprintf(w, "Error. Cannot parse POST params")
 			} else {
 				// parse params
 				params := r.Form
@@ -143,16 +162,27 @@ func webHandler(smsc *Smsc) func(http.ResponseWriter, *http.Request) {
 				message := params.Get("message")
 				systemId := params.Get("system_id")
 				// send MO
-				smsc.SendMoMessage(sender, recipient, message, systemId)
-				http.Redirect(w, r, "/", http.StatusSeeOther)
+				err := smsc.SendMoMessage(sender, recipient, message, systemId)
+				q := url.Values{}
+				if err != nil {
+					q.Add("error", err.Error())
+				} else {
+					q.Add("message", "MO message was successfully sent")
+				}
+				redirUrl := "/?" + q.Encode()
+				http.Redirect(w, r, redirUrl, http.StatusSeeOther)
 			}
 		} else {
 			tpl, err := template.New("webpage").Parse(WEB_PAGE_TPL)
 			if err != nil {
 				log.Fatal("Cannot parse template of the web page")
 			}
+			q := r.URL.Query()
+			errorMsg := q.Get("error")
+			msg := q.Get("message")
 			systemIds := smsc.BoundSystemIds()
-			tpl.Execute(w, TplVars{systemIds})
+			tplVars := TplVars{systemIds, msg, errorMsg}
+			tpl.Execute(w, tplVars)
 		}
 	}
 }
