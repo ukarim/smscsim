@@ -21,6 +21,12 @@ Lightweight, zero-dependency and stupid SMSc simulator.
 
 This will start smpp server on port _2775_ and web server on port _12775_.
 
+or
+
+```bash
+> docker run -p 2775:2775 -p 12775:12775 ukarim/smscsim:0.1.0
+```
+
 ### Delivery reports
 
 If it was requested by _submit_sm_ packet, delivery receipt will be returned after 2 sec with a message state always set to _DELIVERED_.
