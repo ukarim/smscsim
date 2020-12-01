@@ -2,8 +2,10 @@ version: '3'
 
 services:
   smscsim:
-    image: ukarim/smscsim:0.1.0
+    image: ukarim/smscsim
     ports:
       - '2775:2775'
       - '12775:12775'
+    environment:
+      - TZ=Asia/Almaty
 

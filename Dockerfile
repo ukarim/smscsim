@@ -4,12 +4,16 @@ WORKDIR /app
 
 COPY . /app
 
-RUN ["go", "build"]
-
+RUN apk upgrade --update \
+    && apk add -U tzdata \
+    && rm -rf /var/cache/apk/* \
+    && go build
 
 ##########################################
 
 FROM alpine:3.12.1
+
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=build /app/smscsim /app/smscsim
 
