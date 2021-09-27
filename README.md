@@ -1,5 +1,7 @@
 # smscsim
 
+![Run tests](https://github.com/ukarim/smscsim/workflows/run-tests/badge.svg)
+
 Lightweight, zero-dependency and stupid SMSc simulator.
 
 ### Warning
