@@ -52,7 +52,6 @@ publishImg: true
 
 sms-smsc: # sms short message service center
   dockerfile: deploy/test-cluster/sms/smsc/service/dockerfiles/Dockerfile
-  manifestsPath: deploy/test-cluster/sms/smsc/service/k8s-manifests
   dependent:
   current: 1.0.0
   next: 1.0.0

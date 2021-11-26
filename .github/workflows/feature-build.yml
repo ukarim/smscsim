@@ -1,4 +1,4 @@
-name: jcc-feature-build
+name: smscsim-feature-build
 
 # Triggered only when creating a PR on merging to main.
 on:
@@ -66,12 +66,6 @@ jobs:
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
-
-    # K8S manifests validation.
-    - name: K8S Manifest Validation
-      run: |
-        kubeval $(find deploy -name service*.yaml)
-        kubeval $(find deploy -name deploy*.yaml)
 
     # Build binaries.
     # The aim of this step is not for deployment but rather for checking if the app is buildable.
