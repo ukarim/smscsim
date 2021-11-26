@@ -1,0 +1,59 @@
+name: smscsim
+
+# APP的设置：
+#
+# <APP Short Name>
+#   apiPath: API的目录，用于选择性编译API（暂未应用）
+#
+#   appPath: app的目录，用于选择性执行单元测试
+#
+#   dockerfile: dockerfile路径
+#
+#   manifestsPath: k8s manifests 文件所在目录
+#
+#   dependent: 依赖该APP的APPs。
+#     举例：A calls B, 则 B 的 'dependent' 为 A；
+#
+#   current, 当前（线上）版本号
+#
+#   next, 下一次发布版本。注意：
+#   1) next >= current；
+#   2) 一个release版本不允许发布多次。
+#
+# <APP Short Name>，注意事项：
+#   1) 需要与下文中定义一致；
+#   2) 需要与release notes名一致；
+#   3) 允许字母、数字、下划线，以字母开头，全部小写。
+
+
+# deployable 是发布总开关，用于控制是否发布到生产环境
+# true - 发布；
+# false - 暂不发布到集成环境、测试床或生产
+deployable: true
+
+deploy:  [sms-smsc]
+
+# type 定义了发布的版本类型:
+#   release - 生产发布c
+#   pre - 测试版本
+type: pre
+
+# covCheck 规定了是否进行覆盖率检查：
+#   true - 检查
+#   false - 不检查
+covCheck: false
+
+
+# publishImg 定义了发布时是否需要构建容器镜像:
+#   true - 构建
+#   false - 不构建
+publishImg: true
+
+
+sms-smsc: # sms short message service center
+  dockerfile: deploy/test-cluster/sms/smsc/service/dockerfiles/Dockerfile
+  manifestsPath: deploy/test-cluster/sms/smsc/service/k8s-manifests
+  dependent:
+  current: 1.0.0
+  next: 1.0.0
+

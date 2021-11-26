@@ -1,0 +1,87 @@
+name: jcc-feature-build
+
+# Triggered only when creating a PR on merging to main.
+on:
+  pull_request:
+    branches: [ main, 'hotfix/**' ]
+    paths-ignore: [ 'CHANGELOG', 'README.md' ]
+    types: [ opened, synchronize, reopened ]
+
+env:
+  GOPRIVATE: "github.com/juphoon/*"
+  GOPROXY: "https://goproxy.io,direct"
+  GH_ACCESSTOKEN: ${{ secrets.GH_ACCESSTOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    # Setup shell.
+    - name: Setup shell env
+      run: |
+        sudo dpkg-reconfigure dash
+
+    # Install utils. That includes:
+    # yq        - parsing and querying data from YAML files;
+    # jq        - parsing and querying data from JSON files;
+    # kubeval   - validating k8s manifests files.
+    - name: Install Utils
+      run: |
+        sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys CC86BB64
+        sudo add-apt-repository ppa:rmescandon/yq
+        sudo apt update
+        sudo apt install yq -y
+        sudo apt install jq
+        wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+        tar xf kubeval-linux-amd64.tar.gz
+        sudo cp kubeval /usr/local/bin
+
+    # Install Go.
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.16.x
+
+    # Checkout codes.
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Extract LOC stats.
+    - name: Cloc analysis
+      id: scc
+      uses: iryanbell/scc-docker-action@v1.0.0
+      with:
+        args: ${{ env.workspace }} -i go
+
+    # Setup cache for go modules.
+    - name: Cache go Modules
+      uses: actions/cache@v2
+      with:
+        # In order:
+        # * Module download cache
+        # * Build cache (Linux)
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    # K8S manifests validation.
+    - name: K8S Manifest Validation
+      run: |
+        kubeval $(find deploy -name service*.yaml)
+        kubeval $(find deploy -name deploy*.yaml)
+
+    # Build binaries.
+    # The aim of this step is not for deployment but rather for checking if the app is buildable.
+    - name: Build
+      run: |
+        go build
+
+    # Upload reports.
+    - name: Upload Build Reports
+      uses: actions/upload-artifact@v2
+      with:
+        name: Reports
+        path: reports
