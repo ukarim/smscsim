@@ -32,8 +32,9 @@ const (
 // command status
 
 const (
-	STS_OK          = 0x00000000
-	STS_INVALID_CMD = 0x00000003
+	STS_OK            = 0x00000000
+	STS_INVALID_CMD   = 0x00000003
+	STS_ALREADY_BOUND = 0x00000005
 )
 
 const (
@@ -121,7 +122,7 @@ func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) err
 func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 	sessionId := rand.Int()
 	systemId := "anonymous"
-	stopLoop := false
+	bound := false
 
 	defer delete(smsc.Sessions, sessionId)
 	defer conn.Close()
@@ -156,17 +157,25 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 					return
 				}
 				systemId = string(pduBody[:idx])
-				smsc.Sessions[sessionId] = Session{systemId, conn}
 				log.Printf("bind request from system_id[%s]\n", systemId)
 
 				respCmdId := 2147483648 + cmdId // hack to calc resp cmd id
-				respBytes = stringBodyPDU(respCmdId, STS_OK, seqNum, "smscsim")
+
+				if bound {
+					respBytes = headerPDU(respCmdId, STS_ALREADY_BOUND, seqNum)
+					log.Printf("[%s] already has bound session", systemId)
+				} else {
+					smsc.Sessions[sessionId] = Session{systemId, conn}
+					respBytes = stringBodyPDU(respCmdId, STS_OK, seqNum, "smscsim")
+					bound = true
+				}
 			}
 		case UNBIND: // unbind request
 			{
 				log.Printf("unbind request from system_id[%s]\n", systemId)
 				respBytes = headerPDU(UNBIND_RESP, STS_OK, seqNum)
-				stopLoop = true
+				bound = false
+				systemId = "anonymous"
 			}
 		case ENQUIRE_LINK: // enquire_link
 			{
@@ -271,10 +280,6 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 		if _, err := conn.Write(respBytes); err != nil {
 			log.Printf("error sending response to system_id[%s] due %v. closing connection", systemId, err)
-			return
-		}
-
-		if stopLoop {
 			return
 		}
 	}
