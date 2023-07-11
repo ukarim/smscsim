@@ -4,6 +4,43 @@
 
 Lightweight, zero-dependency and stupid SMSc simulator.
 
+### Usage
+
+1) Build from sources (need golang compiler)
+
+```
+go build
+./smscsim
+```
+
+2) Build docker image
+
+```
+docker build -t smscsim .
+docker run -p 2775:2775 -p 12775:12775 smscsim
+```
+
+3) Use prebuild docker image (from hub.docker.com)
+
+```
+docker run -p 2775:2775 -p 12775:12775 ukarim/smscsim
+```
+
+then, just configure your smpp client to connect to `localhost:2775`
+
+### Features
+
+#### Delivery reports (DLR)
+
+If it was requested by _submit_sm_ packet, delivery receipt will be returned
+after 2 sec with a message state always set to _DELIVERED_.
+
+#### MO messages
+
+Mobile originated messages (from `smsc` to `smpp client`) can be sent using
+special web page available at `http://localhost:12775` . MO message will be
+delivered to the selected smpp session using a _deliver_sm_ PDU.
+
 ### Warning
 
 * simulator implements only a small subset of the SMPP3.4 specification and supports only the following PDUs:
@@ -13,30 +50,6 @@ Lightweight, zero-dependency and stupid SMSc simulator.
   - `enquire_link`
   - `deliver_sm_resp`
 * simulator does not perform PDU validation
-
-### Usage
-
-```bash
-> go build
-> ./smscsim
-```
-
-This will start smpp server on port _2775_ and web server on port _12775_.
-
-or
-
-```bash
-> docker run -p 2775:2775 -p 12775:12775 ukarim/smscsim
-```
-
-### Delivery reports
-
-If it was requested by _submit_sm_ packet, delivery receipt will be returned after 2 sec with a message state always set to _DELIVERED_.
-
-### MO messages
-
-MO messages can be triggered using a special web page http://localhost:12775.
-MO message will be delivered to the selected smpp session using a _deliver_sm_ PDU.
 
 ### Env variables
 

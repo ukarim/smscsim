@@ -34,6 +34,7 @@ const (
 const (
 	STS_OK            = 0x00000000
 	STS_INVALID_CMD   = 0x00000003
+	STS_INV_BIND_STS  = 0x00000004
 	STS_ALREADY_BOUND = 0x00000005
 )
 
@@ -43,8 +44,9 @@ const (
 )
 
 type Session struct {
-	SystemId string
-	Conn     net.Conn
+	SystemId  string
+	Conn      net.Conn
+	ReceiveMo bool
 }
 
 type Tlv struct {
@@ -93,15 +95,22 @@ func (smsc *Smsc) BoundSystemIds() []string {
 
 func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) error {
 	var conn net.Conn
+	receiveMo := false
 	for _, sess := range smsc.Sessions {
 		if systemId == sess.SystemId {
 			conn = sess.Conn
+			receiveMo = sess.ReceiveMo
 		}
 	}
 
 	if conn == nil {
 		log.Printf("Cannot send MO message to systemId: [%s]. No bound session found", systemId)
 		return fmt.Errorf("No session found for systemId: [%s]", systemId)
+	}
+
+	if !receiveMo {
+		log.Printf("Cannot send MO message to systemId: [%s]. Only RECEIVER and TRANSCEIVER sessions could receive MO messages", systemId)
+		return fmt.Errorf("Only RECEIVER and TRANSCEIVER sessions could receive MO messages")
 	}
 
 	// TODO implement UDH for large messages
@@ -123,6 +132,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 	sessionId := rand.Int()
 	systemId := "anonymous"
 	bound := false
+	receiver := false
 
 	defer delete(smsc.Sessions, sessionId)
 	defer conn.Close()
@@ -165,9 +175,11 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 					respBytes = headerPDU(respCmdId, STS_ALREADY_BOUND, seqNum)
 					log.Printf("[%s] already has bound session", systemId)
 				} else {
-					smsc.Sessions[sessionId] = Session{systemId, conn}
+					receiveMo := cmdId == BIND_RECEIVER || cmdId == BIND_TRANSCEIVER
+					smsc.Sessions[sessionId] = Session{systemId, conn, receiveMo}
 					respBytes = stringBodyPDU(respCmdId, STS_OK, seqNum, "smscsim")
 					bound = true
+					receiver = cmdId == BIND_RECEIVER
 				}
 			}
 		case UNBIND: // unbind request
@@ -236,20 +248,25 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 
 				// prepare submit_sm_resp
 				msgId := strconv.Itoa(rand.Int())
-				respBytes = stringBodyPDU(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
 
-				if registeredDlr != 0 {
-					go func() {
-						time.Sleep(2000 * time.Millisecond)
-						now := time.Now()
-						dlr := deliveryReceiptPDU(msgId, now, now)
-						if _, err := conn.Write(dlr); err != nil {
-							log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
-							return
-						} else {
-							log.Printf("delivery receipt for message [%s] was send to system_id[%s]", msgId, systemId)
-						}
-					}()
+				if receiver {
+					respBytes = headerPDU(SUBMIT_SM_RESP, STS_INV_BIND_STS, seqNum)
+				} else {
+					respBytes = stringBodyPDU(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
+
+					if registeredDlr != 0 {
+						go func() {
+							time.Sleep(2000 * time.Millisecond)
+							now := time.Now()
+							dlr := deliveryReceiptPDU(msgId, now, now)
+							if _, err := conn.Write(dlr); err != nil {
+								log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
+								return
+							} else {
+								log.Printf("delivery receipt for message [%s] was send to system_id[%s]", msgId, systemId)
+							}
+						}()
+					}
 				}
 			}
 		case DELIVER_SM_RESP: // deliver_sm_resp
