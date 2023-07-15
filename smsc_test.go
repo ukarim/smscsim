@@ -68,7 +68,7 @@ func TestDeliverSmPduBytes(t *testing.T) {
 	ms_validity_tlv := Tlv{0x1204, 1, []byte{2}}
 	tlv_list := []Tlv{privacy_indicator_tlv, ms_validity_tlv}
 
-	actualBytes := deliverSmPDU(source_addr, destination_addr, short_message, sequence_number, tlv_list)
+	actualBytes := deliverSmPDU(source_addr, destination_addr, []byte(short_message), 0, sequence_number, tlv_list)
 	if !reflect.DeepEqual(expectedBytes, actualBytes) {
 		fmt.Printf("expected: [%s]\nactual: [%s]\n\n", hex.EncodeToString(expectedBytes), hex.EncodeToString(actualBytes))
 		t.Errorf("PDU with string body incorrectly encoded")

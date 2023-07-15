@@ -90,11 +90,11 @@ const WEB_PAGE_TPL = `
   <p id="title">Send MO message</p>
   <p>
     <label for="sender">Sender (MSISDN)</label>
-    <input id="sender" type="text" name="sender" placeholder="sender">
+    <input id="sender" type="text" name="sender" placeholder="sender" value="{{ .Sender }}">
   </p>
   <p>
     <label for="recipient">Recipient (short number)</label>
-    <input id="recipient" type="text" name="recipient" placeholder="recipient">
+    <input id="recipient" type="text" name="recipient" placeholder="recipient" value="{{ .Recipient }}">
   </p>
   <p>
     <label for="system_id">System ID</label>
@@ -131,6 +131,8 @@ type TplVars struct {
 	SystemIds    []string
 	Message      string
 	ErrorMessage string
+	Sender       string
+	Recipient    string
 }
 
 func NewWebServer(smsc Smsc) WebServer {
@@ -169,6 +171,8 @@ func webHandler(smsc *Smsc) func(http.ResponseWriter, *http.Request) {
 				} else {
 					q.Add("message", "MO message was successfully sent")
 				}
+				q.Add("sender", sender)
+				q.Add("recipient", recipient)
 				redirUrl := "/?" + q.Encode()
 				http.Redirect(w, r, redirUrl, http.StatusSeeOther)
 			}
@@ -180,8 +184,10 @@ func webHandler(smsc *Smsc) func(http.ResponseWriter, *http.Request) {
 			q := r.URL.Query()
 			errorMsg := q.Get("error")
 			msg := q.Get("message")
+			sender := q.Get("sender")
+			recipient := q.Get("recipient")
 			systemIds := smsc.BoundSystemIds()
-			tplVars := TplVars{systemIds, msg, errorMsg}
+			tplVars := TplVars{systemIds, msg, errorMsg, sender, recipient}
 			tpl.Execute(w, tplVars)
 		}
 	}

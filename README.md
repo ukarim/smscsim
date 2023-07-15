@@ -13,14 +13,14 @@ go build
 ./smscsim
 ```
 
-2) Build docker image
+2) or build docker image
 
 ```
 docker build -t smscsim .
 docker run -p 2775:2775 -p 12775:12775 smscsim
 ```
 
-3) Use prebuild docker image (from hub.docker.com)
+3) or use prebuild docker image (from hub.docker.com)
 
 ```
 docker run -p 2775:2775 -p 12775:12775 ukarim/smscsim

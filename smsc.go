@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // command id
@@ -37,6 +38,15 @@ const (
 	STS_INV_BIND_STS  = 0x00000004
 	STS_ALREADY_BOUND = 0x00000005
 )
+
+// data coding
+
+const (
+	CODING_DEFAULT = 0x00
+	CODING_UCS2    = 0x08
+)
+
+// optional parameters
 
 const (
 	TLV_RECEIPTED_MSG_ID = 0x001E
@@ -94,21 +104,20 @@ func (smsc *Smsc) BoundSystemIds() []string {
 }
 
 func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) error {
-	var conn net.Conn
-	receiveMo := false
+	var session *Session = nil
 	for _, sess := range smsc.Sessions {
 		if systemId == sess.SystemId {
-			conn = sess.Conn
-			receiveMo = sess.ReceiveMo
+			session = &sess
+			break
 		}
 	}
 
-	if conn == nil {
+	if session == nil {
 		log.Printf("Cannot send MO message to systemId: [%s]. No bound session found", systemId)
 		return fmt.Errorf("No session found for systemId: [%s]", systemId)
 	}
 
-	if !receiveMo {
+	if !session.ReceiveMo {
 		log.Printf("Cannot send MO message to systemId: [%s]. Only RECEIVER and TRANSCEIVER sessions could receive MO messages", systemId)
 		return fmt.Errorf("Only RECEIVER and TRANSCEIVER sessions could receive MO messages")
 	}
@@ -116,8 +125,8 @@ func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) err
 	// TODO implement UDH for large messages
 	shortMsg := truncateString(message, 70) // just truncate to 70 symbols
 	var tlvs []Tlv
-	moMessage := deliverSmPDU(sender, recipient, shortMsg, rand.Int(), tlvs)
-	if _, err := conn.Write(moMessage); err != nil {
+	moMessage := deliverSmPDU(sender, recipient, toUcs2Coding(shortMsg), CODING_UCS2, rand.Int(), tlvs)
+	if _, err := session.Conn.Write(moMessage); err != nil {
 		log.Printf("Cannot send MO message to systemId: [%s]. Network error [%v]", systemId, err)
 		return fmt.Errorf("Cannot send MO message. Network error")
 	} else {
@@ -203,6 +212,12 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				}
 				log.Printf("submit_sm from system_id[%s]\n", systemId)
 
+				if receiver {
+					respBytes = headerPDU(SUBMIT_SM_RESP, STS_INV_BIND_STS, seqNum)
+					log.Printf("error handling submit_sm from system_id[%s]. session with bind type RECEIVER cannot send requests", systemId)
+					break
+				}
+
 				idxCounter := 0
 				nullTerm := []byte("\x00")
 
@@ -249,24 +264,20 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				// prepare submit_sm_resp
 				msgId := strconv.Itoa(rand.Int())
 
-				if receiver {
-					respBytes = headerPDU(SUBMIT_SM_RESP, STS_INV_BIND_STS, seqNum)
-				} else {
-					respBytes = stringBodyPDU(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
+				respBytes = stringBodyPDU(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
 
-					if registeredDlr != 0 {
-						go func() {
-							time.Sleep(2000 * time.Millisecond)
-							now := time.Now()
-							dlr := deliveryReceiptPDU(msgId, now, now)
-							if _, err := conn.Write(dlr); err != nil {
-								log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
-								return
-							} else {
-								log.Printf("delivery receipt for message [%s] was send to system_id[%s]", msgId, systemId)
-							}
-						}()
-					}
+				if registeredDlr != 0 {
+					go func() {
+						time.Sleep(2000 * time.Millisecond)
+						now := time.Now()
+						dlr := deliveryReceiptPDU(msgId, now, now)
+						if _, err := conn.Write(dlr); err != nil {
+							log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
+							return
+						} else {
+							log.Printf("delivery receipt for message [%s] was send to system_id[%s]", msgId, systemId)
+						}
+					}()
 				}
 			}
 		case DELIVER_SM_RESP: // deliver_sm_resp
@@ -342,10 +353,10 @@ func deliveryReceiptPDU(msgId string, submitDate, doneDate time.Time) []byte {
 	msgStateTlv := Tlv{TLV_MESSAGE_STATE, 1, []byte{2}} // 2 - delivered
 	tlvs = append(tlvs, msgStateTlv)
 
-	return deliverSmPDU("", "", deliveryReceipt, rand.Int(), tlvs)
+	return deliverSmPDU("", "", []byte(deliveryReceipt), CODING_DEFAULT, rand.Int(), tlvs)
 }
 
-func deliverSmPDU(sender, recipient, shortMessage string, seqNum int, tlvs []Tlv) []byte {
+func deliverSmPDU(sender, recipient string, shortMessage []byte, coding byte, seqNum int, tlvs []Tlv) []byte {
 	// header without cmd_len
 	header := make([]byte, 12)
 	binary.BigEndian.PutUint32(header[0:], uint32(DELIVER_SM))
@@ -377,19 +388,19 @@ func deliverSmPDU(sender, recipient, shortMessage string, seqNum int, tlvs []Tlv
 		buf.WriteByte(0)
 	}
 
-	buf.WriteByte(0) // esm class
-	buf.WriteByte(0) // protocol id
-	buf.WriteByte(0) // priority flag
-	buf.WriteByte(0) // sched delivery time
-	buf.WriteByte(0) // validity period
-	buf.WriteByte(0) // registered delivery
-	buf.WriteByte(0) // replace if present
-	buf.WriteByte(0) // data coding
-	buf.WriteByte(0) // def msg id
+	buf.WriteByte(0)      // esm class
+	buf.WriteByte(0)      // protocol id
+	buf.WriteByte(0)      // priority flag
+	buf.WriteByte(0)      // sched delivery time
+	buf.WriteByte(0)      // validity period
+	buf.WriteByte(0)      // registered delivery
+	buf.WriteByte(0)      // replace if present
+	buf.WriteByte(coding) // data coding
+	buf.WriteByte(0)      // def msg id
 
 	smLen := len(shortMessage)
 	buf.WriteByte(byte(smLen))
-	buf.WriteString(shortMessage)
+	buf.Write(shortMessage)
 
 	for _, t := range tlvs {
 		tlvBytes := make([]byte, 4)
@@ -417,4 +428,22 @@ func truncateString(input string, maxLen int) string {
 		result = input[0:maxLen]
 	}
 	return result
+}
+
+func toUcs2Coding(input string) []byte {
+	// not most elegant implementation, but ok for testing purposes
+	l := utf8.RuneCountInString(input)
+	buf := make([]byte, l*2) // two bytes per character
+	idx := 0
+	for len(input) > 0 {
+		r, s := utf8.DecodeRuneInString(input)
+		if r <= 65536 {
+			binary.BigEndian.PutUint16(buf[idx:], uint16(r))
+		} else {
+			binary.BigEndian.PutUint16(buf[idx:], uint16(63)) // question mark
+		}
+		input = input[s:]
+		idx += 2
+	}
+	return buf
 }
