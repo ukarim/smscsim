@@ -12,11 +12,12 @@ var wg sync.WaitGroup
 func main() {
 	smscPort := getPort("SMSC_PORT", 2775)
 	webPort := getPort("WEB_PORT", 12775)
+	failedDlrs := "true" == os.Getenv("FAILED_DLRS")
 
 	wg.Add(2)
 
 	// start smpp server
-	smsc := NewSmsc()
+	smsc := NewSmsc(failedDlrs)
 	go smsc.Start(smscPort, wg)
 
 	// start web server

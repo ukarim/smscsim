@@ -66,12 +66,13 @@ type Tlv struct {
 }
 
 type Smsc struct {
-	Sessions map[int]Session
+	Sessions   map[int]Session
+	FailedDlrs bool
 }
 
-func NewSmsc() Smsc {
+func NewSmsc(failedDlrs bool) Smsc {
 	sessions := make(map[int]Session)
-	return Smsc{sessions}
+	return Smsc{sessions, failedDlrs}
 }
 
 func (smsc *Smsc) Start(port int, wg sync.WaitGroup) {
@@ -270,7 +271,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 					go func() {
 						time.Sleep(2000 * time.Millisecond)
 						now := time.Now()
-						dlr := deliveryReceiptPDU(msgId, now, now)
+						dlr := deliveryReceiptPDU(msgId, now, now, smsc.FailedDlrs)
 						if _, err := conn.Write(dlr); err != nil {
 							log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
 							return
@@ -334,12 +335,19 @@ func stringBodyPDU(cmdId, cmdSts, seqNum uint32, body string) []byte {
 	return buf
 }
 
-const DELIVERY_RECEIPT_FORMAT = "id:%s sub:001 dlvrd:001 submit date:%s done date:%s stat:DELIVRD err:000 Text:..."
+const DLR_RECEIPT_FORMAT = "id:%s sub:001 dlvrd:001 submit date:%s done date:%s stat:DELIVRD err:000 Text:..."
+const DLR_RECEIPT_FORMAT_FAILED = "id:%s sub:001 dlvrd:000 submit date:%s done date:%s stat:UNDELIV err:069 Text:..."
 
-func deliveryReceiptPDU(msgId string, submitDate, doneDate time.Time) []byte {
+func deliveryReceiptPDU(msgId string, submitDate, doneDate time.Time, failedDeliv bool) []byte {
 	sbtDateFrmt := submitDate.Format("0601021504")
 	doneDateFrmt := doneDate.Format("0601021504")
-	deliveryReceipt := fmt.Sprintf(DELIVERY_RECEIPT_FORMAT, msgId, sbtDateFrmt, doneDateFrmt)
+	dlrFmt := DLR_RECEIPT_FORMAT
+	msgState := []byte{2}
+	if failedDeliv {
+		dlrFmt = DLR_RECEIPT_FORMAT_FAILED
+		msgState = []byte{5}
+	}
+	deliveryReceipt := fmt.Sprintf(dlrFmt, msgId, sbtDateFrmt, doneDateFrmt)
 	var tlvs []Tlv
 
 	// receipted_msg_id TLV
@@ -350,7 +358,7 @@ func deliveryReceiptPDU(msgId string, submitDate, doneDate time.Time) []byte {
 	tlvs = append(tlvs, receiptMsgId)
 
 	// message_state TLV
-	msgStateTlv := Tlv{TLV_MESSAGE_STATE, 1, []byte{2}} // 2 - delivered
+	msgStateTlv := Tlv{TLV_MESSAGE_STATE, 1, msgState}
 	tlvs = append(tlvs, msgStateTlv)
 
 	return deliverSmPDU("", "", []byte(deliveryReceipt), CODING_DEFAULT, rand.Int(), tlvs)

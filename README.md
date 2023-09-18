@@ -55,4 +55,4 @@ delivered to the selected smpp session using a _deliver_sm_ PDU.
 
 * SMSC_PORT - override default smpp port
 * WEB_PORT - override default web port
-
+* FAILED_DLRS - if this is set to true, you can receive DLRs with UNDELIVERABLE status
