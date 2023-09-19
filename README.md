@@ -55,4 +55,6 @@ delivered to the selected smpp session using a _deliver_sm_ PDU.
 
 * SMSC_PORT - override default smpp port
 * WEB_PORT - override default web port
-* FAILED_DLRS - if this is set to true, you can receive DLRs with UNDELIVERABLE status
+* FAILED_SUBMITS - if this is set to true, submit_sm requests will fail
+  - for submit_sm with even sequence number smscsim will return submit_sm_resp with command_status set to 0x00000008 (System Error)
+  - for submit_sm with odd sequence number smscsim will return DLR with UNDELIVERABLE message state

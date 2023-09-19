@@ -37,6 +37,7 @@ const (
 	STS_INVALID_CMD   = 0x00000003
 	STS_INV_BIND_STS  = 0x00000004
 	STS_ALREADY_BOUND = 0x00000005
+	STS_SYS_ERROR     = 0x00000008
 )
 
 // data coding
@@ -66,13 +67,13 @@ type Tlv struct {
 }
 
 type Smsc struct {
-	Sessions   map[int]Session
-	FailedDlrs bool
+	Sessions      map[int]Session
+	FailedSubmits bool
 }
 
-func NewSmsc(failedDlrs bool) Smsc {
+func NewSmsc(failedSubmits bool) Smsc {
 	sessions := make(map[int]Session)
-	return Smsc{sessions, failedDlrs}
+	return Smsc{sessions, failedSubmits}
 }
 
 func (smsc *Smsc) Start(port int, wg sync.WaitGroup) {
@@ -265,20 +266,25 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				// prepare submit_sm_resp
 				msgId := strconv.Itoa(rand.Int())
 
-				respBytes = stringBodyPDU(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
-
-				if registeredDlr != 0 {
-					go func() {
-						time.Sleep(2000 * time.Millisecond)
-						now := time.Now()
-						dlr := deliveryReceiptPDU(msgId, now, now, smsc.FailedDlrs)
-						if _, err := conn.Write(dlr); err != nil {
-							log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
-							return
-						} else {
-							log.Printf("delivery receipt for message [%s] was send to system_id[%s]", msgId, systemId)
-						}
-					}()
+				if smsc.FailedSubmits && seqNum%2 == 0 {
+					// return error response
+					respBytes = headerPDU(SUBMIT_SM_RESP, STS_SYS_ERROR, seqNum)
+				} else {
+					respBytes = stringBodyPDU(SUBMIT_SM_RESP, STS_OK, seqNum, msgId)
+					// send DLR if necessary
+					if registeredDlr != 0 {
+						go func() {
+							time.Sleep(2000 * time.Millisecond)
+							now := time.Now()
+							dlr := deliveryReceiptPDU(msgId, now, now, smsc.FailedSubmits)
+							if _, err := conn.Write(dlr); err != nil {
+								log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
+								return
+							} else {
+								log.Printf("delivery receipt for message [%s] was send to system_id[%s]", msgId, systemId)
+							}
+						}()
+					}
 				}
 			}
 		case DELIVER_SM_RESP: // deliver_sm_resp
