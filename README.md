@@ -20,7 +20,13 @@ docker build -t smscsim .
 docker run -p 2775:2775 -p 12775:12775 smscsim
 ```
 
-3) or use prebuild docker image (from hub.docker.com)
+3) or build and run with docker-compose
+
+```
+docker-compose up
+```
+
+4) or use prebuild docker image (from hub.docker.com)
 
 ```
 docker run -p 2775:2775 -p 12775:12775 ukarim/smscsim
@@ -55,4 +61,6 @@ delivered to the selected smpp session using a _deliver_sm_ PDU.
 
 * SMSC_PORT - override default smpp port
 * WEB_PORT - override default web port
-
+* FAILED_SUBMITS - if this is set to true, submit_sm requests will fail
+  - for submit_sm with even sequence number smscsim will return submit_sm_resp with command_status set to 0x00000008 (System Error)
+  - for submit_sm with odd sequence number smscsim will return DLR with UNDELIVERABLE message state

@@ -2,10 +2,11 @@ version: '3'
 
 services:
   smscsim:
-    image: ukarim/smscsim
+    build: .
     ports:
       - '2775:2775'
       - '12775:12775'
     environment:
       - TZ=Asia/Almaty
+#      - FAILED_SUBMITS=true
 
