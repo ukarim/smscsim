@@ -1,4 +1,4 @@
-FROM golang:1.13.15-alpine AS build
+FROM eclipse-temurin:21.0.1_12-jdk-alpine AS build
 
 WORKDIR /app
 
@@ -6,16 +6,18 @@ COPY . /app
 
 RUN apk upgrade --update \
     && apk add -U tzdata \
-    && rm -rf /var/cache/apk/* \
-    && go build
+    && cd src\
+    && javac module-info.java \
+    && javac smscsim/Main.java \
+    && jar --create --file smscsim.jar module-info.class smscsim/*.class \
+    && jlink --module-path smscsim.jar --add-modules smscsim --output build_out --launcher smscsim=smscsim/smscsim.Main
 
 ##########################################
 
-FROM alpine:3.12.1
+FROM alpine:3.18
 
 COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 
-COPY --from=build /app/smscsim /app/smscsim
+COPY --from=build /app/src/build_out /app
 
-ENTRYPOINT ["/app/smscsim"]
-
+ENTRYPOINT ["/app/bin/smscsim"]
