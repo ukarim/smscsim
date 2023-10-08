@@ -1,3 +1,5 @@
 smscsim
 *.swp
-
+.idea/
+main.exe
+main

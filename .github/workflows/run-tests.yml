@@ -13,11 +13,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
-      - name: Set up Golang
-        uses: actions/setup-go@v2
+      - uses: actions/checkout@v3
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
         with:
-          go-version: 1.16.x
-      - name: Run Golang tests
-        run: go test
+          sdk: 3.1
+      - name: Run Dart tests
+        run: dart pdu_test.dart
 
