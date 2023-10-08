@@ -6,21 +6,20 @@ Lightweight, zero-dependency and stupid SMSc simulator.
 
 ### Usage
 
-1) Build from sources (need golang compiler)
+1) Run as dart script
 
 ```
-go build
+dart main.dart
+```
+
+2) or compile to single executable and run it
+
+```
+dart compile exe main.dart -o smscsim
 ./smscsim
 ```
 
-2) or build docker image
-
-```
-docker build -t smscsim .
-docker run -p 2775:2775 -p 12775:12775 smscsim
-```
-
-3) or build and run with docker-compose
+3) or build and start with docker-compose
 
 ```
 docker-compose up
