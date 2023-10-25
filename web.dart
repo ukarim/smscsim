@@ -60,7 +60,7 @@ class WebServer {
     var data = LinkedHashMap<String, String?>();
     reqBody.split("&").forEach((pair) {
       var p = pair.split("=");
-      data[p[0]] = Uri.decodeComponent(p[1]);
+      data[p[0]] = Uri.decodeQueryComponent(p[1]);
     });
     return data;
   }
