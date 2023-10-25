@@ -287,7 +287,7 @@ class SubmitSmRespPdu extends Pdu {
     var len = 16;
     if (Sts.ok == sts) {
       // also need space for message_id
-      len = len + (messageId != null ? messageId!.length : 0);
+      len = len + (messageId != null ? (messageId!.length + 1) : 0);
     }
     var bytes = ByteData(len);
     bytes.setUint32(0, len);
@@ -296,9 +296,7 @@ class SubmitSmRespPdu extends Pdu {
     bytes.setUint32(12, seq);
     if (Sts.ok == sts && messageId != null) {
       int offset = 16;
-      for (var c in messageId!.codeUnits) {
-        bytes.setUint8(offset++, c);
-      }
+      bytes.setCString(offset, messageId);
     }
     return bytes;
   }

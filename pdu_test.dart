@@ -6,6 +6,7 @@ import 'util.dart';
 void main() {
   testHeaderPdu();
   testBindRespPdu();
+  testSubmitSmRespPdu();
   testDeliverSmPdu();
 }
 
@@ -39,6 +40,23 @@ void testBindRespPdu() {
       expectedBytes.buffer.asByteData(),
       bindResp.toBytes(),
       "BindRespPdu incorrectly encoded"
+  );
+}
+
+void testSubmitSmRespPdu() {
+  var expectedBytes = Uint8List.fromList([
+    0x00, 0x00, 0x00, 0x17,
+    0x80, 0x00, 0x00, 0x04,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x84,
+    0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x00
+  ]);
+  var submitSmResp = SubmitSmRespPdu(Sts.ok, 132);
+  submitSmResp.messageId= "123456";
+  assertByteDataEquals(
+      expectedBytes.buffer.asByteData(),
+      submitSmResp.toBytes(),
+      "SubmitSmResp incorrectly encoded"
   );
 }
 

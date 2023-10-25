@@ -125,6 +125,7 @@ class _DataHandler {
 
   void call(Uint8List byteList) {
     try {
+      // TODO handle partial data
       internalCall(byteList);
     } catch (e) {
       logError("Unexpected error: $e. Closing connection");
