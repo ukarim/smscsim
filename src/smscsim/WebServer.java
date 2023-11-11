@@ -32,7 +32,7 @@ class WebServer extends Thread {
   public void run() {
     try {
       logger.log(INFO, "Starting web server on port " + port);
-      var server = HttpServer.create(new InetSocketAddress("localhost", port), 0);
+      var server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
       server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
       server.createContext("/", exchange -> {
         try {
