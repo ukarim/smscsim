@@ -18,7 +18,7 @@ import static java.lang.System.Logger.Level.INFO;
 import static java.net.URLDecoder.decode;
 import static java.net.URLEncoder.encode;
 
-class WebServer extends Thread {
+class WebServer implements Runnable {
 
   private final System.Logger logger = System.getLogger("WebServer");
   private final int port;
@@ -50,6 +50,7 @@ class WebServer extends Thread {
       server.start();
     } catch (Exception e) {
       logger.log(ERROR, "Error starting WebServer", e);
+      System.exit(1);
     }
   }
 
@@ -173,7 +174,7 @@ class WebServer extends Thread {
           </p>
           <p>
             <label for="short_message">Short message</label>
-            <textarea id="short_message" name="message" maxlength="70" placeholder="Short message..."></textarea>
+            <textarea id="short_message" name="message" placeholder="Short message..."></textarea>
           </p>
           <p>
             <input type="submit" value="Submit">

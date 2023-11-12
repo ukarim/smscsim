@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 import static java.lang.System.Logger.Level.ERROR;
 import static java.lang.System.Logger.Level.INFO;
 
-class SmscServer extends Thread {
+class SmscServer implements Runnable {
 
   private static final DateTimeFormatter DLR_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyMMddHHmm");
 
@@ -42,15 +42,15 @@ class SmscServer extends Thread {
       }
     } catch (Exception e) {
       logger.log(ERROR, "Error starting SmscServer", e);
+      System.exit(1);
     }
   }
 
   private void handleClientSocket(Socket clientSocket) {
+    var session = new Session();
     try(var socket = clientSocket;
         var in = socket.getInputStream();
         var out = socket.getOutputStream()) {
-
-      var session = new Session();
 
       while (true) {
         // read one pdu
@@ -136,6 +136,8 @@ class SmscServer extends Thread {
       }
     } catch (Exception e) {
       logger.log(ERROR, "Error handling client connection", e);
+    } finally {
+      boundSessions.remove(session.sessionId);
     }
   }
 
@@ -191,17 +193,24 @@ class SmscServer extends Thread {
       logger.log(ERROR, "Cannot send MO message to systemId: " + systemId + ". Only RECEIVER and TRANSCEIVER sessions could receive MO messages");
       return Optional.of("Only RECEIVER and TRANSCEIVER sessions could receive MO messages");
     }
-    // TODO implement UDH for large messages
-    message = truncate(message, 70);
-    var deliverSm = new DeliverSm(SmppSts.OK, session.nextSeqNum());
-    deliverSm.serviceType("smscsim");
-    deliverSm.srcAddr(new Addr((byte) 0, (byte) 0, sender));
-    deliverSm.destAddr(new Addr((byte) 0, (byte) 0, recipient));
-    deliverSm.dataCoding((byte) 0x08); // UCS2
-    deliverSm.message(message.getBytes(StandardCharsets.UTF_16BE));
+    List<DeliverSm> pdus = new ArrayList<>();
+    List<byte[]> udhParts = Utils.toUdhParts(message.getBytes(StandardCharsets.UTF_16BE));
+    byte esmClass = (byte) (udhParts.size() > 1 ? 0x40 : 0x00);
+    for (byte[] sm : udhParts) {
+      var deliverSm = new DeliverSm(SmppSts.OK, session.nextSeqNum());
+      deliverSm.serviceType("smscsim");
+      deliverSm.srcAddr(new Addr((byte) 0, (byte) 0, sender));
+      deliverSm.destAddr(new Addr((byte) 0, (byte) 0, recipient));
+      deliverSm.dataCoding((byte) 0x08); // UCS2
+      deliverSm.esmClass(esmClass);
+      deliverSm.message(sm);
+      pdus.add(deliverSm);
+    }
     try {
       OutputStream out = session.socket.getOutputStream();
-      out.write(deliverSm.toBytes());
+      for (Pdu p : pdus) {
+        out.write(p.toBytes());
+      }
     } catch (Exception e) {
       logger.log(ERROR, "error while sending MO message to " + session, e);
       return Optional.of(e.getMessage());

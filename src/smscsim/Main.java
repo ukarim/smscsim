@@ -1,20 +1,21 @@
 package smscsim;
 
+import java.util.concurrent.Executors;
+
 public class Main {
 
-  public static void main(String[] args) throws Exception {
+  public static void main(String[] args) {
     int webPort = intEnvVar("WEB_PORT", 12775);
     int smppPort = intEnvVar("SMSC_PORT", 2775);
     boolean failedSubmits = boolEnvVar("FAILED_SUBMITS", false);
 
     var smscServer = new SmscServer(smppPort, failedSubmits);
-    smscServer.start();
     var webServer = new WebServer(webPort, smscServer);
-    webServer.start();
 
-    // wait for stopping
-    smscServer.join();
-    webServer.join();
+    try (var pool = Executors.newFixedThreadPool(2)) {
+      pool.submit(smscServer);
+      pool.submit(webServer);
+    }
   }
 
   private static int intEnvVar(String name, int def) {
