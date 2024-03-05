@@ -132,6 +132,7 @@ class SmscServer implements Runnable {
         if (resp != null) {
           // send response
           out.write(resp.toBytes());
+          logger.log(INFO, resp.cmd + " pdu was sent to " + session);
         }
       }
     } catch (Exception e) {

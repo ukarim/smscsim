@@ -20,4 +20,4 @@ COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=build /app/src/build_out /app
 
-ENTRYPOINT ["/app/bin/smscsim"]
+ENTRYPOINT ["/app/bin/java", "-m", "smscsim/smscsim.Main"]
