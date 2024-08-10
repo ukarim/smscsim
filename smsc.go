@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/rand"
 	"net"
 	"strconv"
@@ -76,7 +77,7 @@ func NewSmsc(failedSubmits bool) Smsc {
 	return Smsc{sessions, failedSubmits}
 }
 
-func (smsc *Smsc) Start(port int, wg sync.WaitGroup) {
+func (smsc *Smsc) Start(port int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	ln, err := net.Listen("tcp", fmt.Sprint(":", port))
@@ -124,17 +125,21 @@ func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) err
 		return fmt.Errorf("Only RECEIVER and TRANSCEIVER sessions could receive MO messages")
 	}
 
-	// TODO implement UDH for large messages
-	shortMsg := truncateString(message, 70) // just truncate to 70 symbols
-	var tlvs []Tlv
-	moMessage := deliverSmPDU(sender, recipient, toUcs2Coding(shortMsg), CODING_UCS2, rand.Int(), tlvs)
-	if _, err := session.Conn.Write(moMessage); err != nil {
-		log.Printf("Cannot send MO message to systemId: [%s]. Network error [%v]", systemId, err)
-		return fmt.Errorf("Cannot send MO message. Network error")
-	} else {
-		log.Printf("MO message to systemId: [%s] was successfully sent. Sender: [%s], recipient: [%s]", systemId, sender, recipient)
-		return nil
+	udhParts := toUdhParts(toUcs2Coding(message))
+	esmClass := byte(0x00)
+	if len(udhParts) > 1 {
+		esmClass = 0x40
 	}
+	var tlvs []Tlv
+	for i := range udhParts {
+		pdu := deliverSmPDU(sender, recipient, udhParts[i], CODING_UCS2, rand.Int(), esmClass, tlvs)
+		if _, err := session.Conn.Write(pdu); err != nil {
+			log.Printf("Cannot send MO message to systemId: [%s]. Network error [%v]", systemId, err)
+			return fmt.Errorf("Cannot send MO message. Network error")
+		}
+	}
+	log.Printf("MO message to systemId: [%s] was successfully sent. Sender: [%s], recipient: [%s]", systemId, sender, recipient)
+	return nil
 }
 
 // how to convert ints to and from bytes https://golang.org/pkg/encoding/binary/
@@ -172,7 +177,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				}
 
 				// find first null terminator
-				idx := bytes.Index(pduBody, []byte("\x00"))
+				idx := bytes.IndexByte(pduBody, byte(0))
 				if idx == -1 {
 					log.Printf("invalid pdu_body. cannot find system_id. closing connection")
 					return
@@ -221,9 +226,9 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				}
 
 				idxCounter := 0
-				nullTerm := []byte("\x00")
+				nullTerm := byte(0)
 
-				srvTypeEndIdx := bytes.Index(pduBody, nullTerm)
+				srvTypeEndIdx := bytes.IndexByte(pduBody, nullTerm)
 				if srvTypeEndIdx == -1 {
 					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
@@ -231,23 +236,25 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				idxCounter = idxCounter + srvTypeEndIdx
 				idxCounter = idxCounter + 3 // skip src ton and npi
 
-				srcAddrEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
+				srcAddrEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if srcAddrEndIdx == -1 {
 					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
 				}
+				srcAddr := string(pduBody[idxCounter : idxCounter+srcAddrEndIdx])
 				idxCounter = idxCounter + srcAddrEndIdx
 				idxCounter = idxCounter + 3 // skip dest ton and npi
 
-				destAddrEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
+				destAddrEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if destAddrEndIdx == -1 {
 					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
 				}
+				destAddr := string(pduBody[idxCounter : idxCounter+destAddrEndIdx])
 				idxCounter = idxCounter + destAddrEndIdx
 				idxCounter = idxCounter + 4 // skip esm_class, protocol_id, priority_flag
 
-				schedEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
+				schedEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if schedEndIdx == -1 {
 					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
@@ -255,7 +262,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				idxCounter = idxCounter + schedEndIdx
 				idxCounter = idxCounter + 1 // next is validity period
 
-				validityEndIdx := bytes.Index(pduBody[idxCounter:], nullTerm)
+				validityEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if validityEndIdx == -1 {
 					respBytes = headerPDU(GENERIC_NACK, STS_INVALID_CMD, seqNum)
 					break
@@ -276,7 +283,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 						go func() {
 							time.Sleep(2000 * time.Millisecond)
 							now := time.Now()
-							dlr := deliveryReceiptPDU(msgId, now, now, smsc.FailedSubmits)
+							dlr := deliveryReceiptPDU(destAddr, srcAddr, msgId, now, now, smsc.FailedSubmits)
 							if _, err := conn.Write(dlr); err != nil {
 								log.Printf("error sending delivery receipt to system_id[%s] due %v.", systemId, err)
 								return
@@ -344,7 +351,7 @@ func stringBodyPDU(cmdId, cmdSts, seqNum uint32, body string) []byte {
 const DLR_RECEIPT_FORMAT = "id:%s sub:001 dlvrd:001 submit date:%s done date:%s stat:DELIVRD err:000 Text:..."
 const DLR_RECEIPT_FORMAT_FAILED = "id:%s sub:001 dlvrd:000 submit date:%s done date:%s stat:UNDELIV err:069 Text:..."
 
-func deliveryReceiptPDU(msgId string, submitDate, doneDate time.Time, failedDeliv bool) []byte {
+func deliveryReceiptPDU(src, dst, msgId string, submitDate, doneDate time.Time, failedDeliv bool) []byte {
 	sbtDateFrmt := submitDate.Format("0601021504")
 	doneDateFrmt := doneDate.Format("0601021504")
 	dlrFmt := DLR_RECEIPT_FORMAT
@@ -367,10 +374,10 @@ func deliveryReceiptPDU(msgId string, submitDate, doneDate time.Time, failedDeli
 	msgStateTlv := Tlv{TLV_MESSAGE_STATE, 1, msgState}
 	tlvs = append(tlvs, msgStateTlv)
 
-	return deliverSmPDU("", "", []byte(deliveryReceipt), CODING_DEFAULT, rand.Int(), tlvs)
+	return deliverSmPDU(src, dst, []byte(deliveryReceipt), CODING_DEFAULT, rand.Int(), 0x04, tlvs)
 }
 
-func deliverSmPDU(sender, recipient string, shortMessage []byte, coding byte, seqNum int, tlvs []Tlv) []byte {
+func deliverSmPDU(sender, recipient string, shortMessage []byte, coding byte, seqNum int, esmClass byte, tlvs []Tlv) []byte {
 	// header without cmd_len
 	header := make([]byte, 12)
 	binary.BigEndian.PutUint32(header[0:], uint32(DELIVER_SM))
@@ -402,15 +409,15 @@ func deliverSmPDU(sender, recipient string, shortMessage []byte, coding byte, se
 		buf.WriteByte(0)
 	}
 
-	buf.WriteByte(0)      // esm class
-	buf.WriteByte(0)      // protocol id
-	buf.WriteByte(0)      // priority flag
-	buf.WriteByte(0)      // sched delivery time
-	buf.WriteByte(0)      // validity period
-	buf.WriteByte(0)      // registered delivery
-	buf.WriteByte(0)      // replace if present
-	buf.WriteByte(coding) // data coding
-	buf.WriteByte(0)      // def msg id
+	buf.WriteByte(esmClass) // esm class
+	buf.WriteByte(0)        // protocol id
+	buf.WriteByte(0)        // priority flag
+	buf.WriteByte(0)        // sched delivery time
+	buf.WriteByte(0)        // validity period
+	buf.WriteByte(0)        // registered delivery
+	buf.WriteByte(0)        // replace if present
+	buf.WriteByte(coding)   // data coding
+	buf.WriteByte(0)        // def msg id
 
 	smLen := len(shortMessage)
 	buf.WriteByte(byte(smLen))
@@ -436,14 +443,6 @@ func deliverSmPDU(sender, recipient string, shortMessage []byte, coding byte, se
 	return deliverSm.Bytes()
 }
 
-func truncateString(input string, maxLen int) string {
-	result := input
-	if len(input) > maxLen {
-		result = input[0:maxLen]
-	}
-	return result
-}
-
 func toUcs2Coding(input string) []byte {
 	// not most elegant implementation, but ok for testing purposes
 	l := utf8.RuneCountInString(input)
@@ -460,4 +459,30 @@ func toUcs2Coding(input string) []byte {
 		idx += 2
 	}
 	return buf
+}
+
+func toUdhParts(longMsg []byte) [][]byte {
+	msgLen := len(longMsg)
+	if msgLen <= 140 { // max len for message field in pdu
+		// one part is enough
+		return [][]byte{longMsg}
+	}
+	maxUdhContentLen := 134
+	c := int(math.Ceil(float64(msgLen) / float64(maxUdhContentLen)))
+	parts := make([][]byte, c)
+	for i := 0; i < c; i++ {
+		si := i * maxUdhContentLen
+		ei := int(math.Min(float64(si+maxUdhContentLen), float64(msgLen)))
+		partLen := ei - si
+		part := make([]byte, partLen+6) // plus 6 for udh headers
+		part[0] = 0x05
+		part[1] = 0x00
+		part[2] = 0x03
+		part[3] = 0x01 // maybe accept id as method argument?
+		part[4] = byte(c)
+		part[5] = byte(i + 1)
+		copy(part[6:], longMsg[si:ei])
+		parts[i] = part
+	}
+	return parts
 }

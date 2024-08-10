@@ -6,30 +6,17 @@ Lightweight, zero-dependency and stupid SMSc simulator.
 
 ### Usage
 
-1) Build from sources (need golang compiler)
+1) Use prebuild docker image (from hub.docker.com)
+
+```
+docker run -p 2775:2775 -p 12775:12775 ukarim/smscsim
+```
+
+2) Build from sources (need golang compiler)
 
 ```
 go build
 ./smscsim
-```
-
-2) or build docker image
-
-```
-docker build -t smscsim .
-docker run -p 2775:2775 -p 12775:12775 smscsim
-```
-
-3) or build and run with docker-compose
-
-```
-docker-compose up
-```
-
-4) or use prebuild docker image (from hub.docker.com)
-
-```
-docker run -p 2775:2775 -p 12775:12775 ukarim/smscsim
 ```
 
 then, just configure your smpp client to connect to `localhost:2775`

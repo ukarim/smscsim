@@ -18,11 +18,11 @@ func main() {
 
 	// start smpp server
 	smsc := NewSmsc(failedSubmits)
-	go smsc.Start(smscPort, wg)
+	go smsc.Start(smscPort, &wg)
 
 	// start web server
 	webServer := NewWebServer(smsc)
-	go webServer.Start(webPort, wg)
+	go webServer.Start(webPort, &wg)
 
 	wg.Wait()
 }
