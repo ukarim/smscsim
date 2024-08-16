@@ -76,10 +76,13 @@ const WEB_PAGE_TPL = `
       text-transform: uppercase;
       background: #3585f7;
     }
+    input[type="submit"]:disabled {
+      background: #dfdfdf;
+    }
     #message {
       color: #009688;
     }
-    #error {
+    .error {
       color: #f44336;
     }
   </style>
@@ -98,6 +101,9 @@ const WEB_PAGE_TPL = `
   </p>
   <p>
     <label for="system_id">System ID</label>
+    {{ if not .SystemIds }}
+    <sub class="error">No smpp sessions found. At least one smpp client should connect to smscsim</sub>
+    {{ end }}
     <select id="system_id" name="system_id">
     {{ range $systemId := .SystemIds }}
       <option value="{{ $systemId }}">{{ $systemId }}</option>
@@ -109,13 +115,13 @@ const WEB_PAGE_TPL = `
     <textarea id="short_message" name="message" placeholder="Short message..."></textarea>
   </p>
   <p>
-    <input type="submit" value="Submit">
+    <input type="submit" value="Submit" {{ if not .SystemIds }} disabled {{ end }}>
   </p>
   {{ if .Message }}
   <p id="message">{{ .Message }}</p>
   {{ end }}
   {{ if .ErrorMessage }}
-  <p id="error">{{ .ErrorMessage }}</p>
+  <p class="error">{{ .ErrorMessage }}</p>
   {{ end }}
 </form>
 </div>
