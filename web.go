@@ -130,7 +130,7 @@ const WEB_PAGE_TPL = `
 `
 
 type WebServer struct {
-	Smsc Smsc
+	Smsc *Smsc
 }
 
 type TplVars struct {
@@ -141,14 +141,14 @@ type TplVars struct {
 	Recipient    string
 }
 
-func NewWebServer(smsc Smsc) WebServer {
+func NewWebServer(smsc *Smsc) WebServer {
 	return WebServer{smsc}
 }
 
 func (webServer *WebServer) Start(port int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	http.HandleFunc("/", webHandler(&webServer.Smsc))
+	http.HandleFunc("/", webHandler(webServer.Smsc))
 	log.Println("Starting web server on port", port)
 	log.Fatal(http.ListenAndServe(fmt.Sprint(":", port), nil))
 }

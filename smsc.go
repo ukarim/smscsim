@@ -68,13 +68,12 @@ type Tlv struct {
 }
 
 type Smsc struct {
-	Sessions      map[int]Session
+	Sessions      sync.Map
 	FailedSubmits bool
 }
 
-func NewSmsc(failedSubmits bool) Smsc {
-	sessions := make(map[int]Session)
-	return Smsc{sessions, failedSubmits}
+func NewSmsc(failedSubmits bool) *Smsc {
+	return &Smsc{sync.Map{}, failedSubmits}
 }
 
 func (smsc *Smsc) Start(port int, wg *sync.WaitGroup) {
@@ -99,21 +98,25 @@ func (smsc *Smsc) Start(port int, wg *sync.WaitGroup) {
 
 func (smsc *Smsc) BoundSystemIds() []string {
 	var systemIds []string
-	for _, sess := range smsc.Sessions {
+	smsc.Sessions.Range(func(key, value any) bool {
+		sess := value.(Session)
 		systemId := sess.SystemId
 		systemIds = append(systemIds, systemId)
-	}
+		return true
+	})
 	return systemIds
 }
 
 func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) error {
 	var session *Session = nil
-	for _, sess := range smsc.Sessions {
+	smsc.Sessions.Range(func(key, value any) bool {
+		sess := value.(Session)
 		if systemId == sess.SystemId {
 			session = &sess
-			break
+			return false
 		}
-	}
+		return true
+	})
 
 	if session == nil {
 		log.Printf("Cannot send MO message to systemId: [%s]. No bound session found", systemId)
@@ -150,7 +153,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 	bound := false
 	receiver := false
 
-	defer delete(smsc.Sessions, sessionId)
+	defer smsc.Sessions.Delete(sessionId)
 	defer conn.Close()
 
 	for {
@@ -192,7 +195,7 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 					log.Printf("[%s] already has bound session", systemId)
 				} else {
 					receiveMo := cmdId == BIND_RECEIVER || cmdId == BIND_TRANSCEIVER
-					smsc.Sessions[sessionId] = Session{systemId, conn, receiveMo}
+					smsc.Sessions.Store(sessionId, Session{systemId, conn, receiveMo})
 					respBytes = stringBodyPDU(respCmdId, STS_OK, seqNum, "smscsim")
 					bound = true
 					receiver = cmdId == BIND_RECEIVER
