@@ -35,6 +35,7 @@ const (
 
 const (
 	STS_OK            = 0x00000000
+	STS_INV_CMD_LEN   = 0x00000002
 	STS_INVALID_CMD   = 0x00000003
 	STS_INV_BIND_STS  = 0x00000004
 	STS_ALREADY_BOUND = 0x00000005
@@ -165,6 +166,11 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 		}
 		cmdLen := binary.BigEndian.Uint32(pduHeadBuf[0:])
 		cmdId := binary.BigEndian.Uint32(pduHeadBuf[4:])
+		if cmdLen < 16 || cmdLen > maxCommandLength {
+			// cmdLen-16 below would underflow (uint32) and panic, killing every session
+			log.Printf("invalid command_length %d from system_id[%s]. closing connection", cmdLen, systemId)
+			return
+		}
 		// cmdSts := binary.BigEndian.Uint32(pduHeadBuf[8:])
 		seqNum := binary.BigEndian.Uint32(pduHeadBuf[12:])
 
@@ -238,6 +244,10 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				}
 				idxCounter = idxCounter + srvTypeEndIdx
 				idxCounter = idxCounter + 3 // skip src ton and npi
+				if idxCounter >= len(pduBody) {
+					respBytes = headerPDU(GENERIC_NACK, STS_INV_CMD_LEN, seqNum)
+					break
+				}
 
 				srcAddrEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if srcAddrEndIdx == -1 {
@@ -247,6 +257,10 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				srcAddr := string(pduBody[idxCounter : idxCounter+srcAddrEndIdx])
 				idxCounter = idxCounter + srcAddrEndIdx
 				idxCounter = idxCounter + 3 // skip dest ton and npi
+				if idxCounter >= len(pduBody) {
+					respBytes = headerPDU(GENERIC_NACK, STS_INV_CMD_LEN, seqNum)
+					break
+				}
 
 				destAddrEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if destAddrEndIdx == -1 {
@@ -256,6 +270,10 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				destAddr := string(pduBody[idxCounter : idxCounter+destAddrEndIdx])
 				idxCounter = idxCounter + destAddrEndIdx
 				idxCounter = idxCounter + 4 // skip esm_class, protocol_id, priority_flag
+				if idxCounter >= len(pduBody) {
+					respBytes = headerPDU(GENERIC_NACK, STS_INV_CMD_LEN, seqNum)
+					break
+				}
 
 				schedEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if schedEndIdx == -1 {
@@ -264,6 +282,10 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 				}
 				idxCounter = idxCounter + schedEndIdx
 				idxCounter = idxCounter + 1 // next is validity period
+				if idxCounter >= len(pduBody) {
+					respBytes = headerPDU(GENERIC_NACK, STS_INV_CMD_LEN, seqNum)
+					break
+				}
 
 				validityEndIdx := bytes.IndexByte(pduBody[idxCounter:], nullTerm)
 				if validityEndIdx == -1 {
@@ -271,6 +293,10 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 					break
 				}
 				idxCounter = idxCounter + validityEndIdx
+				if idxCounter+1 >= len(pduBody) {
+					respBytes = headerPDU(GENERIC_NACK, STS_INV_CMD_LEN, seqNum)
+					break
+				}
 				registeredDlr := pduBody[idxCounter+1] // registered_delivery is next field after the validity_period
 
 				// prepare submit_sm_resp
@@ -329,6 +355,10 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 		}
 	}
 }
+
+// maxCommandLength is an upper bound for command_length of incoming PDUs
+// (a submit_sm with a 64K message_payload fits well below it).
+const maxCommandLength = 1 << 17
 
 // newSeqNum returns a sequence_number for PDUs initiated by the SMSC.
 // SMPP 3.4 allows 0x00000001 - 0x7FFFFFFF; rand.Int() truncated to
