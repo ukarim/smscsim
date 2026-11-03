@@ -84,3 +84,11 @@ func TestDeliverSmPduBytes(t *testing.T) {
 		t.Errorf("PDU with string body incorrectly encoded")
 	}
 }
+
+func TestNewSeqNumRange(t *testing.T) {
+	for i := 0; i < 100000; i++ {
+		if n := newSeqNum(); n < 1 || n > 0x7FFFFFFF {
+			t.Fatalf("sequence_number out of range: %d", n)
+		}
+	}
+}

@@ -135,7 +135,7 @@ func (smsc *Smsc) SendMoMessage(sender, recipient, message, systemId string) err
 	}
 	var tlvs []Tlv
 	for i := range udhParts {
-		pdu := deliverSmPDU(sender, recipient, udhParts[i], CODING_UCS2, rand.Int(), esmClass, tlvs)
+		pdu := deliverSmPDU(sender, recipient, udhParts[i], CODING_UCS2, newSeqNum(), esmClass, tlvs)
 		if _, err := session.Conn.Write(pdu); err != nil {
 			log.Printf("Cannot send MO message to systemId: [%s]. Network error [%v]", systemId, err)
 			return fmt.Errorf("Cannot send MO message. Network error")
@@ -330,6 +330,13 @@ func handleSmppConnection(smsc *Smsc, conn net.Conn) {
 	}
 }
 
+// newSeqNum returns a sequence_number for PDUs initiated by the SMSC.
+// SMPP 3.4 allows 0x00000001 - 0x7FFFFFFF; rand.Int() truncated to
+// uint32 could fall outside this range.
+func newSeqNum() int {
+	return rand.Intn(0x7FFFFFFF) + 1
+}
+
 func headerPDU(cmdId, cmdSts, seqNum uint32) []byte {
 	buf := make([]byte, 16)
 	binary.BigEndian.PutUint32(buf[0:], 16)
@@ -377,7 +384,7 @@ func deliveryReceiptPDU(src, dst, msgId string, submitDate, doneDate time.Time, 
 	msgStateTlv := Tlv{TLV_MESSAGE_STATE, 1, msgState}
 	tlvs = append(tlvs, msgStateTlv)
 
-	return deliverSmPDU(src, dst, []byte(deliveryReceipt), CODING_DEFAULT, rand.Int(), 0x04, tlvs)
+	return deliverSmPDU(src, dst, []byte(deliveryReceipt), CODING_DEFAULT, newSeqNum(), 0x04, tlvs)
 }
 
 func deliverSmPDU(sender, recipient string, shortMessage []byte, coding byte, seqNum int, esmClass byte, tlvs []Tlv) []byte {
