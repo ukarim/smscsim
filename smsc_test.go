@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"net"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestPduHeaderBytes(t *testing.T) {
@@ -36,13 +41,22 @@ func TestStringBodyPduBytes(t *testing.T) {
 	}
 }
 
+func TestDeliverSmServiceTypeLength(t *testing.T) {
+	pdu := deliverSmPDU("1001", "77012110000", []byte("Test"), CODING_DEFAULT, 1, 0x04, nil)
+	// service_type starts right after the 16 octet header and must fit in 6 octets (SMPP 3.4, 5.2.11)
+	end := bytes.IndexByte(pdu[16:], 0)
+	if end < 0 || end+1 > 6 {
+		t.Fatalf("service_type is %d octets, max is 6", end+1)
+	}
+}
+
 func TestDeliverSmPduBytes(t *testing.T) {
 	expectedBytes := []byte{
-		0x00, 0x00, 0x00, 0x45, // command_length
+		0x00, 0x00, 0x00, 0x3e, // command_length
 		0x00, 0x00, 0x00, 0x05, // command_id
 		0x00, 0x00, 0x00, 0x00, // command_status
 		0x00, 0x00, 0x00, 0x66, // sequence_number
-		0x73, 0x6d, 0x73, 0x63, 0x73, 0x69, 0x6d, 0x00, // service_type
+		0x00,                                                                               // service_type (empty)
 		0x00, 0x00, 0x37, 0x37, 0x30, 0x31, 0x32, 0x31, 0x31, 0x30, 0x30, 0x30, 0x30, 0x00, // source_addr_ton, source_addr_npi, source_addr
 		0x00, 0x00, 0x31, 0x30, 0x30, 0x31, 0x00, // dest_addr_ton, dest_addr_npi, destination_addr
 		0x40,                   // esm class
@@ -72,5 +86,64 @@ func TestDeliverSmPduBytes(t *testing.T) {
 	if !reflect.DeepEqual(expectedBytes, actualBytes) {
 		fmt.Printf("expected: [%s]\nactual: [%s]\n\n", hex.EncodeToString(expectedBytes), hex.EncodeToString(actualBytes))
 		t.Errorf("PDU with string body incorrectly encoded")
+	}
+}
+
+func TestNewSeqNumRange(t *testing.T) {
+	for i := 0; i < 100000; i++ {
+		if n := newSeqNum(); n < 1 || n > 0x7FFFFFFF {
+			t.Fatalf("sequence_number out of range: %d", n)
+		}
+	}
+}
+
+func pduHeader(cmdLen, cmdId, seqNum uint32) []byte {
+	h := make([]byte, 16)
+	binary.BigEndian.PutUint32(h[0:], cmdLen)
+	binary.BigEndian.PutUint32(h[4:], cmdId)
+	binary.BigEndian.PutUint32(h[12:], seqNum)
+	return h
+}
+
+func TestShortCommandLengthClosesConnection(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	done := make(chan struct{})
+	go func() {
+		handleSmppConnection(NewSmsc(false), server)
+		close(done)
+	}()
+	client.Write(pduHeader(8, ENQUIRE_LINK, 1)) // command_length < 16
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("connection was not closed")
+	}
+}
+
+func TestTruncatedSubmitSmGetsGenericNack(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	go handleSmppConnection(NewSmsc(false), server)
+	// all fields up to validity_period, then the PDU ends (registered_delivery missing)
+	body := []byte{
+		0x00,                  // service_type
+		0x00, 0x00, '1', 0x00, // source_addr_ton, source_addr_npi, source_addr
+		0x00, 0x00, '2', 0x00, // dest_addr_ton, dest_addr_npi, destination_addr
+		0x00, 0x00, 0x00, // esm_class, protocol_id, priority_flag
+		0x00, // schedule_delivery_time
+		0x00, // validity_period
+	}
+	client.Write(append(pduHeader(uint32(16+len(body)), SUBMIT_SM, 7), body...))
+	client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	resp := make([]byte, 16)
+	if _, err := io.ReadFull(client, resp); err != nil {
+		t.Fatalf("no response: %v", err)
+	}
+	if id := binary.BigEndian.Uint32(resp[4:]); id != GENERIC_NACK {
+		t.Fatalf("expected generic_nack, got command_id 0x%08x", id)
+	}
+	if seq := binary.BigEndian.Uint32(resp[12:]); seq != 7 {
+		t.Fatalf("expected sequence_number 7, got %d", seq)
 	}
 }
