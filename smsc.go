@@ -391,7 +391,8 @@ func deliverSmPDU(sender, recipient string, shortMessage []byte, coding byte, se
 	var buf bytes.Buffer
 	buf.Write(header)
 
-	buf.WriteString("smscsim")
+	// service_type: empty. SMPP 3.4 (5.2.11) limits it to 6 octets including the NUL terminator;
+	// strict clients (e.g. Kannel) mis-parse the rest of the PDU when it is longer.
 	buf.WriteByte(0) // null term
 
 	buf.WriteByte(0) // src ton

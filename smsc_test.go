@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"reflect"
@@ -36,13 +37,22 @@ func TestStringBodyPduBytes(t *testing.T) {
 	}
 }
 
+func TestDeliverSmServiceTypeLength(t *testing.T) {
+	pdu := deliverSmPDU("1001", "77012110000", []byte("Test"), CODING_DEFAULT, 1, 0x04, nil)
+	// service_type starts right after the 16 octet header and must fit in 6 octets (SMPP 3.4, 5.2.11)
+	end := bytes.IndexByte(pdu[16:], 0)
+	if end < 0 || end+1 > 6 {
+		t.Fatalf("service_type is %d octets, max is 6", end+1)
+	}
+}
+
 func TestDeliverSmPduBytes(t *testing.T) {
 	expectedBytes := []byte{
-		0x00, 0x00, 0x00, 0x45, // command_length
+		0x00, 0x00, 0x00, 0x3e, // command_length
 		0x00, 0x00, 0x00, 0x05, // command_id
 		0x00, 0x00, 0x00, 0x00, // command_status
 		0x00, 0x00, 0x00, 0x66, // sequence_number
-		0x73, 0x6d, 0x73, 0x63, 0x73, 0x69, 0x6d, 0x00, // service_type
+		0x00,                                                                               // service_type (empty)
 		0x00, 0x00, 0x37, 0x37, 0x30, 0x31, 0x32, 0x31, 0x31, 0x30, 0x30, 0x30, 0x30, 0x00, // source_addr_ton, source_addr_npi, source_addr
 		0x00, 0x00, 0x31, 0x30, 0x30, 0x31, 0x00, // dest_addr_ton, dest_addr_npi, destination_addr
 		0x40,                   // esm class
